@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Price Tracker Browser Extension",
+  "version": "1.0",
+  "description": "Detect Amazon products",
+  "permissions": ["activeTab"],
+  "content_scripts": [
+    {
+      "matches": [
+  "https://www.amazon.de/*",
+  "https://www.amazon.com/*",
+  "https://www.amazon.in/*",
+  "https://www.temu.com/*",
+  "https://www.mediamarkt.de/*"
+],
+      "js": ["content.js"]
+    }
+  ]
+}
