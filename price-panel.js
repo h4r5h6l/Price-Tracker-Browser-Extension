@@ -30,16 +30,8 @@
   /* ------------------------------------------------------------------
      STEP 1: get info about the product currently being viewed
      ------------------------------------------------------------------
-     This is the "swappable" function mentioned in the plan.
-     Two options depending on what your teammate's backend expects:
-
-     OPTION A (frontend scrapes, current implementation below):
-       Read title/price/ASIN directly from the Amazon DOM and send that.
-
-     OPTION B (backend scrapes):
-       If your teammate's endpoint only needs the page URL and does its
-       own scraping server-side, replace the body of this function with:
-         return { url: window.location.href };
+     DECIDED: frontend scrapes the DOM (confirmed — backend needs
+     asin + title + price + image, so it can't just work off a bare URL).
      ------------------------------------------------------------------ */
   function getCurrentProductInfo() {
     const asinMatch = window.location.pathname.match(/\/dp\/([A-Z0-9]{10})/i);
@@ -55,6 +47,25 @@
       title: titleEl ? titleEl.textContent.trim() : document.title,
       price: priceEl ? parseFloat(priceEl.textContent.replace(/[^0-9.]/g, '')) : null,
       image: imageEl ? imageEl.src : null
+    };
+  }
+
+  /* ------------------------------------------------------------------
+     STEP 1b: map scraped fields to whatever keys the backend expects.
+     ------------------------------------------------------------------
+     Field names on the LEFT are what getCurrentProductInfo() returns.
+     Values on the RIGHT are placeholders — once your teammate confirms
+     their Python endpoint's expected JSON keys (e.g. snake_case like
+     "product_id" instead of "asin"), only this one object needs to change.
+     Nothing else in the file needs to know about the rename.
+     ------------------------------------------------------------------ */
+  function toBackendPayload(productInfo) {
+    return {
+      asin: productInfo.asin,       // e.g. rename to "product_id" if needed
+      url: productInfo.url,         // e.g. rename to "page_url" if needed
+      title: productInfo.title,     // e.g. rename to "product_title" if needed
+      price: productInfo.price,     // e.g. rename to "current_price" if needed
+      image: productInfo.image      // e.g. rename to "image_url" if needed
     };
   }
 
@@ -285,11 +296,16 @@
     renderGraphSkeleton();
     daysRowEl.innerHTML = '';
 
+    // Visible in DevTools console — confirms exactly what's being sent to the
+    // backend before a real endpoint exists. Safe to remove once verified.
+    const payload = toBackendPayload(productInfo);
+    console.log('[price-panel] sending product info to backend:', payload);
+
     try {
       const res = await fetch(PCX_CONFIG.endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(productInfo)
+        body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error('Request failed: ' + res.status);
       const data = await res.json();
