@@ -1,3 +1,14 @@
+/* find and replace 
+this part of the server for the backend to work correctly  
+
+================================================
+
+ endpoint:'http://localhost:8000/api/price-comparison'
+
+===================================================
+*/
+
+
 /* ==========================================================================
    Price Comparison Panel — Content Script
    Injects a floating tab + slide-in panel onto an Amazon product page.
@@ -24,7 +35,12 @@
     // already loaded on the page (see chart.js CDN <script> tag in demo,
     // or bundle it locally for the real extension — see comment near
     // renderGraph() below for the manifest/CSP implication).
-    endpoint: 'https://your-backend.example.com/api/price-comparison'
+    endpoint: 'http://localhost:8000/api/price-comparison'
+ 
+  
+  
+  
+  
   };
 
   /* ------------------------------------------------------------------
