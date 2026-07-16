@@ -5,7 +5,13 @@
   "description": "Adds a slide-in panel to Amazon product pages showing prices from other websites.",
   "content_scripts": [
     {
-      "matches": ["*://*.amazon.com/*"],
+      "matches": [
+  "https://www.amazon.de/*",
+  "https://www.amazon.com/*",
+  "https://www.amazon.in/*",
+  "https://www.temu.com/*",
+  "https://www.mediamarkt.de/*"
+],
       "css": ["price-panel.css"],
       "js": ["price-panel.js"]
     }
