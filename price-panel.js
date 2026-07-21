@@ -4,90 +4,85 @@
    Namespaced with `pcx` to avoid clashing with Amazon's own JS globals.
    ========================================================================== */
 
-(function() {
-        'use strict';
+(function () {
+  'use strict';
 
-        /* ------------------------------------------------------------------
-           CONFIG — swap this for your teammate's real backend URL
-           ------------------------------------------------------------------ */
-        const PCX_CONFIG = {
-            // Expected request body: { asin, url, title, price }
-            // Expected response body:
-            //   {
-            //     sources: [ { name: "Best Buy", price: 94.99, url: "https://..." }, ... ],
-            //     updatedAt: "2026-07-12T18:30:00Z",
-            //     priceHistory: [ { date: "2026-06-14", price: 99.99 }, ... ],   // for the graph
-            //     bestDeals:   [ { date: "2026-07-16", price: 84.99 }, ... ]      // "nearest days" chips
-            //   }
-            //
-            // NOTE: rendering the graph requires Chart.js. This file assumes it's
-            // already loaded on the page (see chart.js CDN <script> tag in demo,
-            // or bundle it locally for the real extension — see comment near
-            // renderGraph() below for the manifest/CSP implication).
-            endpoint: 'https://your-backend.example.com/api/price-comparison'
-        };
+  /* ------------------------------------------------------------------
+     CONFIG — swap this for your teammate's real backend URL
+     ------------------------------------------------------------------ */
+  const PCX_CONFIG = {
+    endpoint: 'https://your-backend.example.com/api/price-comparison'
+  };
 
-        /* ------------------------------------------------------------------
-           STEP 1: get info about the product currently being viewed
-           ------------------------------------------------------------------
-           DECIDED: frontend scrapes the DOM (confirmed — backend needs
-           asin + title + price + image, so it can't just work off a bare URL).
-           ------------------------------------------------------------------ */
-        function getCurrentProductInfo() {
-            const asinMatch = window.location.pathname.match(/\/dp\/([A-Z0-9]{10})/i);
-            const asin = asinMatch ? asinMatch[1] : null;
+  /* ------------------------------------------------------------------
+     STEP 1: get info about the product currently being viewed
+     ------------------------------------------------------------------ */
+  function getCurrentProductInfo() {
+    const asinMatch = window.location.pathname.match(/\/dp\/([A-Z0-9]{10})/i);
+    const asin = asinMatch ? asinMatch[1] : null;
 
-            const titleEl = document.querySelector('#productTitle');
-            const priceEl = document.querySelector('.a-price .a-offscreen');
-            const imageEl = document.querySelector('#landingImage, #imgBlkFront');
+    const titleEl = document.querySelector('#productTitle');
+    const priceEl = document.querySelector('.a-price .a-offscreen');
+    const imageEl = document.querySelector('#landingImage, #imgBlkFront');
 
-            return {
-                asin,
-                url: window.location.href,
-                title: titleEl ? titleEl.textContent.trim() : document.title,
-                price: priceEl ? parseFloat(priceEl.textContent.replace(/[^0-9.]/g, '')) : null,
-                image: imageEl ? imageEl.src : null
-            };
+    return {
+      asin,
+      url: window.location.href,
+      title: titleEl ? titleEl.textContent.trim() : document.title,
+      price: priceEl ? parseFloat(priceEl.textContent.replace(/[^0-9.]/g, '')) : null,
+      image: imageEl ? imageEl.src : null
+    };
+  }
+
+  function toBackendPayload(productInfo) {
+    return {
+      asin: productInfo.asin,
+      url: productInfo.url,
+      title: productInfo.title,
+      price: productInfo.price,
+      image: productInfo.image
+    };
+  }
+
+  /* ------------------------------------------------------------------
+     STEP 2: build the DOM (tab + panel) once, reuse it
+     ------------------------------------------------------------------ */
+  let panelEl, tabEl, bodyListEl, currentBlockEl, updatedEl, graphWrapEl, daysRowEl;
+  let chartInstance = null;
+  let searchInterval = null;
+
+  function buildUI() {
+    tabEl = document.createElement('button');
+    tabEl.className = 'pcx-tab';
+    tabEl.setAttribute('aria-label', 'Compare prices across websites');
+    tabEl.textContent = 'COMPARE PRICES';
+    tabEl.addEventListener('click', openPanel);
+
+    panelEl = document.createElement('div');
+    panelEl.className = 'pcx-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-modal', 'false');
+    panelEl.setAttribute('aria-label', 'Price comparison panel');
+    panelEl.innerHTML = `
+      <style>
+        @keyframes pcx-ring {
+          0% { transform: rotate(0); }
+          15% { transform: rotate(15deg); }
+          30% { transform: rotate(-15deg); }
+          45% { transform: rotate(10deg); }
+          60% { transform: rotate(-10deg); }
+          75% { transform: rotate(5deg); }
+          100% { transform: rotate(0); }
         }
-
-        /* ------------------------------------------------------------------
-           STEP 1b: map scraped fields to whatever keys the backend expects.
-           ------------------------------------------------------------------
-           Field names on the LEFT are what getCurrentProductInfo() returns.
-           Values on the RIGHT are placeholders — once your teammate confirms
-           their Python endpoint's expected JSON keys (e.g. snake_case like
-           "product_id" instead of "asin"), only this one object needs to change.
-           Nothing else in the file needs to know about the rename.
-           ------------------------------------------------------------------ */
-        function toBackendPayload(productInfo) {
-            return {
-                asin: productInfo.asin, // e.g. rename to "product_id" if needed
-                url: productInfo.url, // e.g. rename to "page_url" if needed
-                title: productInfo.title, // e.g. rename to "product_title" if needed
-                price: productInfo.price, // e.g. rename to "current_price" if needed
-                image: productInfo.image // e.g. rename to "image_url" if needed
-            };
-        }
-
-        /* ------------------------------------------------------------------
-           STEP 2: build the DOM (tab + panel) once, reuse it
-           ------------------------------------------------------------------ */
-        let panelEl, tabEl, bodyListEl, currentBlockEl, updatedEl, graphWrapEl, daysRowEl;
-        let chartInstance = null; // holds the Chart.js instance so we can destroy/redraw
-
-        function buildUI() {
-            tabEl = document.createElement('button');
-            tabEl.className = 'pcx-tab';
-            tabEl.setAttribute('aria-label', 'Compare prices across websites');
-            tabEl.textContent = 'COMPARE PRICES';
-            tabEl.addEventListener('click', openPanel);
-
-            panelEl = document.createElement('div');
-            panelEl.className = 'pcx-panel';
-            panelEl.setAttribute('role', 'dialog');
-            panelEl.setAttribute('aria-modal', 'false'); // page stays interactive
-            panelEl.setAttribute('aria-label', 'Price comparison panel');
-            panelEl.innerHTML = `
+        .pcx-ring-anim { animation: pcx-ring 0.6s ease-in-out; display: inline-block; }
+        .pcx-days-header { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; margin-bottom: 8px; }
+        .pcx-days-title { margin: 0 !important; }
+        .pcx-bell-btn { background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 4px; transition: background 0.2s; }
+        .pcx-bell-btn:hover { background: #f0f2f5; }
+        .pcx-notify-dropdown { display: none; margin-bottom: 10px; background: #f8f9fa; border: 1px solid #ddd; padding: 8px; border-radius: 6px; font-size: 12px; }
+        .pcx-notify-dropdown.pcx-show { display: block; }
+        .pcx-notify-select { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #ccc; margin-top: 4px; font-size: 12px; }
+      </style>
       <div class="pcx-header">
         <h2>Compare prices</h2>
         <button class="pcx-close" aria-label="Close">&times;</button>
@@ -98,50 +93,64 @@
         <div id="pcxList"></div>
         <p class="pcx-updated" id="pcxUpdated"></p>
 
+        <!-- Best Upcoming Days moved above Price History -->
+        <div class="pcx-days-header">
+          <p class="pcx-days-title" style="font-weight: 600; font-size: 13px; color: #333;">Best upcoming days</p>
+          <button class="pcx-bell-btn" id="pcxBellBtn" title="Get notified on price drop">🔔</button>
+        </div>
+        
+        <div class="pcx-notify-dropdown" id="pcxNotifyDropdown">
+          <label for="pcxDateSelect" style="color: #555; font-weight: 500;">Select date to get alert:</label>
+          <select class="pcx-notify-select" id="pcxDateSelect"></select>
+        </div>
+
+        <div class="pcx-days-row" id="pcxDaysRow"></div>
+
+        <!-- Price History section moved below Best Upcoming Days -->
         <div class="pcx-graph-section">
           <p class="pcx-graph-title">Price history</p>
           <div class="pcx-graph-wrap" id="pcxGraphWrap"></div>
         </div>
-
-        <p class="pcx-days-title">Best upcoming days</p>
-        <div class="pcx-days-row" id="pcxDaysRow"></div>
       </div>
     `;
 
-            panelEl.querySelector('.pcx-close').addEventListener('click', closePanel);
-            document.body.appendChild(tabEl);
-            document.body.appendChild(panelEl);
+    panelEl.querySelector('.pcx-close').addEventListener('click', closePanel);
+    document.body.appendChild(tabEl);
+    document.body.appendChild(panelEl);
 
-            currentBlockEl = panelEl.querySelector('#pcxCurrent');
-            bodyListEl = panelEl.querySelector('#pcxList');
-            updatedEl = panelEl.querySelector('#pcxUpdated');
-            graphWrapEl = panelEl.querySelector('#pcxGraphWrap');
-            daysRowEl = panelEl.querySelector('#pcxDaysRow');
+    currentBlockEl = panelEl.querySelector('#pcxCurrent');
+    bodyListEl = panelEl.querySelector('#pcxList');
+    updatedEl = panelEl.querySelector('#pcxUpdated');
+    graphWrapEl = panelEl.querySelector('#pcxGraphWrap');
+    daysRowEl = panelEl.querySelector('#pcxDaysRow');
 
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && panelEl.classList.contains('pcx-open')) closePanel();
-            });
-        }
+    const bellBtn = panelEl.querySelector('#pcxBellBtn');
+    const notifyDropdown = panelEl.querySelector('#pcxNotifyDropdown');
+    bellBtn.addEventListener('click', () => {
+      notifyDropdown.classList.toggle('pcx-show');
+    });
 
-        function openPanel() {
-            panelEl.classList.add('pcx-open');
-            tabEl.classList.add('pcx-hidden');
-            loadComparison();
-        }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && panelEl.classList.contains('pcx-open')) closePanel();
+    });
+  }
 
-        function closePanel() {
-            panelEl.classList.remove('pcx-open');
-            tabEl.classList.remove('pcx-hidden');
-        }
+  function openPanel() {
+    panelEl.classList.add('pcx-open');
+    tabEl.classList.add('pcx-hidden');
+    loadComparison();
+  }
 
-        /* ------------------------------------------------------------------
-           STEP 3: render current product + fetch comparison data
-           ------------------------------------------------------------------ */
-        function renderCurrentProduct(info) {
-            const priceHtml = info.price ?
-                `<p class="pcx-current-price">$${info.price.toFixed(2)}</p>` :
-                '';
-            currentBlockEl.innerHTML = `
+  function closePanel() {
+    panelEl.classList.remove('pcx-open');
+    tabEl.classList.remove('pcx-hidden');
+  }
+
+  function renderCurrentProduct(info) {
+    const priceHtml = info.price
+      ? `<p class="pcx-current-price">$${info.price.toFixed(2)}</p>`
+      : '';
+    currentBlockEl.innerHTML = `
       ${info.image ? `<img src="${info.image}" alt="">` : ''}
       <div class="pcx-current-info">
         <h3>${escapeHtml(info.title || 'Current product')}</h3>
@@ -149,13 +158,36 @@
       </div>`;
   }
 
-  function renderSkeleton() {
-    bodyListEl.innerHTML = Array(4).fill(`
-      <div class="pcx-skel-row">
-        <div class="pcx-skel pcx-line1"></div>
-        <div class="pcx-skel pcx-line2"></div>
-      </div>`).join('');
+  function renderSearching() {
+    const sites = ['Best Buy', 'Walmart', 'Target', 'eBay', 'B&H Photo', 'Newegg'];
+    let idx = 0;
+
+    bodyListEl.innerHTML = `
+      <style>
+        @keyframes pcx-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .pcx-searching-container { text-align: center; padding: 30px 0; color: #555; }
+        .pcx-spinner { margin: 0 auto 12px; width: 28px; height: 28px; border: 3px solid #f3f3f3; border-top: 3px solid #FF9900; border-radius: 50%; animation: pcx-spin 1s linear infinite; }
+        .pcx-search-text { font-size: 14px; margin: 0; font-weight: 500; font-family: sans-serif; }
+      </style>
+      <div class="pcx-searching-container">
+        <div class="pcx-spinner"></div>
+        <p id="pcxSearchText" class="pcx-search-text">Searching ${sites[0]}...</p>
+      </div>
+    `;
     updatedEl.textContent = '';
+
+    const textEl = document.getElementById('pcxSearchText');
+    searchInterval = setInterval(() => {
+      idx = (idx + 1) % sites.length;
+      if (textEl) textEl.textContent = `Searching ${sites[idx]}...`;
+    }, 250);
+  }
+
+  function stopSearching() {
+    if (searchInterval) {
+      clearInterval(searchInterval);
+      searchInterval = null;
+    }
   }
 
   function renderError() {
@@ -194,15 +226,6 @@
     }
   }
 
-  /* ------------------------------------------------------------------
-     Price history graph (Chart.js)
-     ------------------------------------------------------------------
-     Requires Chart.js to be loaded on the page/extension context.
-     For a real extension: either bundle chart.min.js locally and list it
-     in manifest.json's content_scripts "js" array (before this file), or
-     add the CDN host to manifest.json's content_security_policy. Content
-     scripts can't rely on a page's own <script> tags for this.
-     ------------------------------------------------------------------ */
   function renderGraphSkeleton() {
     graphWrapEl.innerHTML = `<div class="pcx-skel pcx-graph-skel"></div>`;
   }
@@ -254,9 +277,6 @@
     });
   }
 
-  /* ------------------------------------------------------------------
-     Nearest-day chips — clicking one highlights that point on the graph
-     ------------------------------------------------------------------ */
   function renderDayChips(bestDeals, priceHistory) {
     if (!bestDeals || bestDeals.length === 0) {
       daysRowEl.innerHTML = `<div class="pcx-state">No upcoming deals found.</div>`;
@@ -270,6 +290,25 @@
       </button>
     `).join('');
 
+    const dateSelect = panelEl.querySelector('#pcxDateSelect');
+    dateSelect.innerHTML = `<option value="" disabled selected>-- Choose a discount date --</option>` + 
+      bestDeals.map(d => `<option value="${d.date}">${formatShortDate(d.date)} ($${d.price.toFixed(2)})</option>`).join('');
+
+    dateSelect.onchange = () => {
+      const selectedDate = dateSelect.value;
+      const notifyDropdown = panelEl.querySelector('#pcxNotifyDropdown');
+      const bellBtn = panelEl.querySelector('#pcxBellBtn');
+
+      notifyDropdown.classList.remove('pcx-show');
+      bellBtn.classList.add('pcx-ring-anim');
+      
+      setTimeout(() => {
+        bellBtn.classList.remove('pcx-ring-anim');
+      }, 600);
+
+      console.log(`[price-panel] Notification set for price drop on: ${selectedDate}`);
+    };
+
     daysRowEl.querySelectorAll('.pcx-day-chip').forEach(chip => {
       chip.addEventListener('click', () => {
         daysRowEl.querySelectorAll('.pcx-day-chip').forEach(c => c.classList.remove('pcx-day-active'));
@@ -278,7 +317,6 @@
       });
     });
 
-    // Highlight the first (soonest) day by default once the graph exists
     if (priceHistory && priceHistory.length) {
       renderGraph(priceHistory, bestDeals[0].date);
     }
@@ -292,14 +330,16 @@
   async function loadComparison() {
     const productInfo = getCurrentProductInfo();
     renderCurrentProduct(productInfo);
-    renderSkeleton();
+    
+    renderSearching();
     renderGraphSkeleton();
     daysRowEl.innerHTML = '';
 
-    // Visible in DevTools console — confirms exactly what's being sent to the
-    // backend before a real endpoint exists. Safe to remove once verified.
     const payload = toBackendPayload(productInfo);
     console.log('[price-panel] sending product info to backend:', payload);
+
+    const delayDuration = Math.floor(Math.random() * 750) + 500;
+    await new Promise(resolve => setTimeout(resolve, delayDuration));
 
     try {
       const res = await fetch(PCX_CONFIG.endpoint, {
@@ -309,19 +349,23 @@
       });
       if (!res.ok) throw new Error('Request failed: ' + res.status);
       const data = await res.json();
+      
+      stopSearching();
       renderResults(data.sources, data.updatedAt);
       renderDayChips(data.bestDeals, data.priceHistory);
       if (!data.bestDeals || !data.bestDeals.length) renderGraph(data.priceHistory);
     } catch (err) {
       console.warn('[price-panel] comparison fetch failed, using mock data:', err);
-      // Mock fallback so the UI is demoable before the backend is wired up.
+      
+      stopSearching();
       const mockHistory = buildMockHistory();
       const mockDeals = buildMockDeals();
       renderResults(
         [
           { name: 'Best Buy', price: 94.99, url: '#' },
           { name: 'Walmart', price: 92.50, url: '#' },
-          { name: 'Target', price: 97.00, url: '#' }
+          { name: 'Target', price: 97.00, url: '#' },
+          { name: 'eBay', price: 91.00, url: '#' }
         ],
         new Date().toISOString()
       );
@@ -363,12 +407,16 @@
     return div.innerHTML;
   }
 
-  /* ------------------------------------------------------------------
-     INIT
-     ------------------------------------------------------------------ */
+  function initExtension() {
+    const productInfo = getCurrentProductInfo();
+    if (productInfo && productInfo.asin) {
+      buildUI();
+    }
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', buildUI);
+    document.addEventListener('DOMContentLoaded', initExtension);
   } else {
-    buildUI();
+    initExtension();
   }
 })();
