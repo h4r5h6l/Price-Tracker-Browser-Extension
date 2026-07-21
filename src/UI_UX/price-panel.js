@@ -1,109 +1,93 @@
-/* find and replace 
-this part of the server for the backend to work correctly  
-
-================================================
-
- endpoint:'http://localhost:8000/api/price-comparison'
-
-===================================================
-*/
-
-
 /* ==========================================================================
    Price Comparison Panel — Content Script
    Injects a floating tab + slide-in panel onto an Amazon product page.
    Namespaced with `pcx` to avoid clashing with Amazon's own JS globals.
    ========================================================================== */
 
-(function () {
-  'use strict';
+(function() {
+        'use strict';
 
-  /* ------------------------------------------------------------------
-     CONFIG — swap this for your teammate's real backend URL
-     ------------------------------------------------------------------ */
-  const PCX_CONFIG = {
-    // Expected request body: { asin, url, title, price }
-    // Expected response body:
-    //   {
-    //     sources: [ { name: "Best Buy", price: 94.99, url: "https://..." }, ... ],
-    //     updatedAt: "2026-07-12T18:30:00Z",
-    //     priceHistory: [ { date: "2026-06-14", price: 99.99 }, ... ],   // for the graph
-    //     bestDeals:   [ { date: "2026-07-16", price: 84.99 }, ... ]      // "nearest days" chips
-    //   }
-    //
-    // NOTE: rendering the graph requires Chart.js. This file assumes it's
-    // already loaded on the page (see chart.js CDN <script> tag in demo,
-    // or bundle it locally for the real extension — see comment near
-    // renderGraph() below for the manifest/CSP implication).
-    endpoint: 'http://localhost:8000/api/price-comparison'
- 
-  
-  
-  
-  
-  };
+        /* ------------------------------------------------------------------
+           CONFIG — swap this for your teammate's real backend URL
+           ------------------------------------------------------------------ */
+        const PCX_CONFIG = {
+            // Expected request body: { asin, url, title, price }
+            // Expected response body:
+            //   {
+            //     sources: [ { name: "Best Buy", price: 94.99, url: "https://..." }, ... ],
+            //     updatedAt: "2026-07-12T18:30:00Z",
+            //     priceHistory: [ { date: "2026-06-14", price: 99.99 }, ... ],   // for the graph
+            //     bestDeals:   [ { date: "2026-07-16", price: 84.99 }, ... ]      // "nearest days" chips
+            //   }
+            //
+            // NOTE: rendering the graph requires Chart.js. This file assumes it's
+            // already loaded on the page (see chart.js CDN <script> tag in demo,
+            // or bundle it locally for the real extension — see comment near
+            // renderGraph() below for the manifest/CSP implication).
+            endpoint: 'https://your-backend.example.com/api/price-comparison'
+        };
 
-  /* ------------------------------------------------------------------
-     STEP 1: get info about the product currently being viewed
-     ------------------------------------------------------------------
-     DECIDED: frontend scrapes the DOM (confirmed — backend needs
-     asin + title + price + image, so it can't just work off a bare URL).
-     ------------------------------------------------------------------ */
-  function getCurrentProductInfo() {
-    const asinMatch = window.location.pathname.match(/\/dp\/([A-Z0-9]{10})/i);
-    const asin = asinMatch ? asinMatch[1] : null;
+        /* ------------------------------------------------------------------
+           STEP 1: get info about the product currently being viewed
+           ------------------------------------------------------------------
+           DECIDED: frontend scrapes the DOM (confirmed — backend needs
+           asin + title + price + image, so it can't just work off a bare URL).
+           ------------------------------------------------------------------ */
+        function getCurrentProductInfo() {
+            const asinMatch = window.location.pathname.match(/\/dp\/([A-Z0-9]{10})/i);
+            const asin = asinMatch ? asinMatch[1] : null;
 
-    const titleEl = document.querySelector('#productTitle');
-    const priceEl = document.querySelector('.a-price .a-offscreen');
-    const imageEl = document.querySelector('#landingImage, #imgBlkFront');
+            const titleEl = document.querySelector('#productTitle');
+            const priceEl = document.querySelector('.a-price .a-offscreen');
+            const imageEl = document.querySelector('#landingImage, #imgBlkFront');
 
-    return {
-      asin,
-      url: window.location.href,
-      title: titleEl ? titleEl.textContent.trim() : document.title,
-      price: priceEl ? parseFloat(priceEl.textContent.replace(/[^0-9.]/g, '')) : null,
-      image: imageEl ? imageEl.src : null
-    };
-  }
+            return {
+                asin,
+                url: window.location.href,
+                title: titleEl ? titleEl.textContent.trim() : document.title,
+                price: priceEl ? parseFloat(priceEl.textContent.replace(/[^0-9.]/g, '')) : null,
+                image: imageEl ? imageEl.src : null
+            };
+        }
 
-  /* ------------------------------------------------------------------
-     STEP 1b: map scraped fields to whatever keys the backend expects.
-     ------------------------------------------------------------------
-     Field names on the LEFT are what getCurrentProductInfo() returns.
-     Values on the RIGHT are placeholders — once your teammate confirms
-     their Python endpoint's expected JSON keys (e.g. snake_case like
-     "product_id" instead of "asin"), only this one object needs to change.
-     Nothing else in the file needs to know about the rename.
-     ------------------------------------------------------------------ */
-  function toBackendPayload(productInfo) {
-    return {
-      asin: productInfo.asin,       // e.g. rename to "product_id" if needed
-      url: productInfo.url,         // e.g. rename to "page_url" if needed
-      title: productInfo.title,     // e.g. rename to "product_title" if needed
-      price: productInfo.price,     // e.g. rename to "current_price" if needed
-      image: productInfo.image      // e.g. rename to "image_url" if needed
-    };
-  }
+        /* ------------------------------------------------------------------
+           STEP 1b: map scraped fields to whatever keys the backend expects.
+           ------------------------------------------------------------------
+           Field names on the LEFT are what getCurrentProductInfo() returns.
+           Values on the RIGHT are placeholders — once your teammate confirms
+           their Python endpoint's expected JSON keys (e.g. snake_case like
+           "product_id" instead of "asin"), only this one object needs to change.
+           Nothing else in the file needs to know about the rename.
+           ------------------------------------------------------------------ */
+        function toBackendPayload(productInfo) {
+            return {
+                asin: productInfo.asin, // e.g. rename to "product_id" if needed
+                url: productInfo.url, // e.g. rename to "page_url" if needed
+                title: productInfo.title, // e.g. rename to "product_title" if needed
+                price: productInfo.price, // e.g. rename to "current_price" if needed
+                image: productInfo.image // e.g. rename to "image_url" if needed
+            };
+        }
 
-  /* ------------------------------------------------------------------
-     STEP 2: build the DOM (tab + panel) once, reuse it
-     ------------------------------------------------------------------ */
-  let panelEl, tabEl, bodyListEl, currentBlockEl, updatedEl, graphWrapEl, daysRowEl;
-  let chartInstance = null; // holds the Chart.js instance so we can destroy/redraw
+        /* ------------------------------------------------------------------
+           STEP 2: build the DOM (tab + panel) once, reuse it
+           ------------------------------------------------------------------ */
+        let panelEl, tabEl, bodyListEl, currentBlockEl, updatedEl, graphWrapEl, daysRowEl;
+        let chartInstance = null; // holds the Chart.js instance so we can destroy/redraw
 
-  function buildUI() {
-    tabEl = document.createElement('button');
-    tabEl.className = 'pcx-tab';
-    tabEl.setAttribute('aria-label', 'Compare prices across websites');
-    tabEl.textContent = 'COMPARE PRICES';
-    tabEl.addEventListener('click', openPanel);
+        function buildUI() {
+            tabEl = document.createElement('button');
+            tabEl.className = 'pcx-tab';
+            tabEl.setAttribute('aria-label', 'Compare prices across websites');
+            tabEl.textContent = 'COMPARE PRICES';
+            tabEl.addEventListener('click', openPanel);
 
-    panelEl = document.createElement('div');
-    panelEl.className = 'pcx-panel';
-    panelEl.setAttribute('role', 'dialog');
-    panelEl.setAttribute('aria-modal', 'false'); // page stays interactive
-    panelEl.setAttribute('aria-label', 'Price comparison panel');
-    panelEl.innerHTML = `
+            panelEl = document.createElement('div');
+            panelEl.className = 'pcx-panel';
+            panelEl.setAttribute('role', 'dialog');
+            panelEl.setAttribute('aria-modal', 'false'); // page stays interactive
+            panelEl.setAttribute('aria-label', 'Price comparison panel');
+            panelEl.innerHTML = `
       <div class="pcx-header">
         <h2>Compare prices</h2>
         <button class="pcx-close" aria-label="Close">&times;</button>
@@ -124,40 +108,40 @@ this part of the server for the backend to work correctly
       </div>
     `;
 
-    panelEl.querySelector('.pcx-close').addEventListener('click', closePanel);
-    document.body.appendChild(tabEl);
-    document.body.appendChild(panelEl);
+            panelEl.querySelector('.pcx-close').addEventListener('click', closePanel);
+            document.body.appendChild(tabEl);
+            document.body.appendChild(panelEl);
 
-    currentBlockEl = panelEl.querySelector('#pcxCurrent');
-    bodyListEl = panelEl.querySelector('#pcxList');
-    updatedEl = panelEl.querySelector('#pcxUpdated');
-    graphWrapEl = panelEl.querySelector('#pcxGraphWrap');
-    daysRowEl = panelEl.querySelector('#pcxDaysRow');
+            currentBlockEl = panelEl.querySelector('#pcxCurrent');
+            bodyListEl = panelEl.querySelector('#pcxList');
+            updatedEl = panelEl.querySelector('#pcxUpdated');
+            graphWrapEl = panelEl.querySelector('#pcxGraphWrap');
+            daysRowEl = panelEl.querySelector('#pcxDaysRow');
 
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && panelEl.classList.contains('pcx-open')) closePanel();
-    });
-  }
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && panelEl.classList.contains('pcx-open')) closePanel();
+            });
+        }
 
-  function openPanel() {
-    panelEl.classList.add('pcx-open');
-    tabEl.classList.add('pcx-hidden');
-    loadComparison();
-  }
+        function openPanel() {
+            panelEl.classList.add('pcx-open');
+            tabEl.classList.add('pcx-hidden');
+            loadComparison();
+        }
 
-  function closePanel() {
-    panelEl.classList.remove('pcx-open');
-    tabEl.classList.remove('pcx-hidden');
-  }
+        function closePanel() {
+            panelEl.classList.remove('pcx-open');
+            tabEl.classList.remove('pcx-hidden');
+        }
 
-  /* ------------------------------------------------------------------
-     STEP 3: render current product + fetch comparison data
-     ------------------------------------------------------------------ */
-  function renderCurrentProduct(info) {
-    const priceHtml = info.price
-      ? `<p class="pcx-current-price">$${info.price.toFixed(2)}</p>`
-      : '';
-    currentBlockEl.innerHTML = `
+        /* ------------------------------------------------------------------
+           STEP 3: render current product + fetch comparison data
+           ------------------------------------------------------------------ */
+        function renderCurrentProduct(info) {
+            const priceHtml = info.price ?
+                `<p class="pcx-current-price">$${info.price.toFixed(2)}</p>` :
+                '';
+            currentBlockEl.innerHTML = `
       ${info.image ? `<img src="${info.image}" alt="">` : ''}
       <div class="pcx-current-info">
         <h3>${escapeHtml(info.title || 'Current product')}</h3>
