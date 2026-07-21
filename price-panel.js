@@ -165,14 +165,23 @@ this part of the server for the backend to work correctly
       </div>`;
   }
 
-  function renderSkeleton() {
-    bodyListEl.innerHTML = Array(4).fill(`
-      <div class="pcx-skel-row">
-        <div class="pcx-skel pcx-line1"></div>
-        <div class="pcx-skel pcx-line2"></div>
-      </div>`).join('');
-    updatedEl.textContent = '';
-  }
+ function renderSkeleton() {
+  bodyListEl.innerHTML = `
+    <div class="pcx-loading-box">
+      <div class="pcx-spinner"></div>
+
+      <h3>Searching for matches...</h3>
+
+      <p class="pcx-loading-text">
+        Checking Amazon, Temu and MediaMarkt
+      </p>
+
+      <div class="pcx-loading-dots"></div>
+    </div>
+  `;
+
+  updatedEl.textContent = '';
+}
 
   function renderError() {
     bodyListEl.innerHTML = `
@@ -183,32 +192,78 @@ this part of the server for the backend to work correctly
     document.getElementById('pcxRetry').addEventListener('click', loadComparison);
   }
 
-  function renderEmpty() {
-    bodyListEl.innerHTML = `<div class="pcx-state">No matches found on other sites.</div>`;
-  }
+function renderEmpty(sites = []) {
 
-  function renderResults(sources, updatedAt) {
-    if (!sources || sources.length === 0) return renderEmpty();
+  const checkedSites = sites.length
+    ? sites.map(site => `<div>✓ ${site}</div>`).join("")
+    : "<div>✓ Retailers checked</div>";
 
-    const lowest = Math.min(...sources.map(s => s.price));
-    bodyListEl.innerHTML = sources
-      .slice()
-      .sort((a, b) => a.price - b.price)
-      .map(s => `
-        <div class="pcx-row">
-          <span class="pcx-site"><span class="pcx-dot"></span>${escapeHtml(s.name)}</span>
-          <span>
-            <span class="pcx-price ${s.price === lowest ? 'pcx-best' : ''}">
-              $${s.price.toFixed(2)}${s.price === lowest ? '<span class="pcx-best-badge">Best</span>' : ''}
-            </span>
-            ${s.url ? `<a href="${s.url}" target="_blank" rel="noopener">View</a>` : ''}
+  bodyListEl.innerHTML = `
+    <div class="pcx-warning">
+
+      <h3>⚠️ No matching product found</h3>
+
+      <p class="pcx-tip">
+        💡 Try searching with a shorter product name or check again later.
+      </p>
+
+      <div class="pcx-status">
+        <strong>Comparison Status</strong>
+        ${checkedSites}
+      </div>
+
+      <p>
+        No retailer returned a matching product.
+      </p>
+
+      <button id="retry-search-btn">
+        Retry Search
+      </button>
+
+    </div>
+  `;
+
+  document
+    .getElementById("retry-search-btn")
+    ?.addEventListener("click", () => {
+      location.reload();
+    });
+}
+
+function renderResults(sources, updatedAt) {
+
+  if (!sources || sources.length === 0)
+    return renderEmpty([
+      "Amazon",
+      "Temu",
+      "MediaMarkt"
+    ]);
+
+  const lowest = Math.min(...sources.map(s => s.price));
+
+  bodyListEl.innerHTML = sources
+    .slice()
+    .sort((a, b) => a.price - b.price)
+    .map(s => `
+      <div class="pcx-row">
+        <span class="pcx-site">
+          <span class="pcx-dot"></span>${escapeHtml(s.name)}
+        </span>
+        <span>
+          <span class="pcx-price ${s.price === lowest ? 'pcx-best' : ''}">
+            $${s.price.toFixed(2)}
+            ${s.price === lowest ? '<span class="pcx-best-badge">Best</span>' : ''}
           </span>
-        </div>`).join('');
+          ${s.url ? `<a href="${s.url}" target="_blank" rel="noopener">View</a>` : ''}
+        </span>
+      </div>
+    `).join('');
 
-    if (updatedAt) {
-      updatedEl.textContent = `Updated ${new Date(updatedAt).toLocaleTimeString()}`;
-    }
+  if (updatedAt) {
+    updatedEl.textContent =
+      `Updated ${new Date(updatedAt).toLocaleTimeString()}`;
   }
+}
 
   /* ------------------------------------------------------------------
      Price history graph (Chart.js)
@@ -309,6 +364,16 @@ this part of the server for the backend to work correctly
     const productInfo = getCurrentProductInfo();
     renderCurrentProduct(productInfo);
     renderSkeleton();
+    const slowNetworkTimer = setTimeout(() => {
+
+  bodyListEl.innerHTML = `
+    <div class="pcx-warning">
+      ⏳ Search is taking longer than expected...
+      Please wait.
+    </div>
+  `;
+
+}, 5000);
     renderGraphSkeleton();
     daysRowEl.innerHTML = '';
 
@@ -316,6 +381,9 @@ this part of the server for the backend to work correctly
     // backend before a real endpoint exists. Safe to remove once verified.
     const payload = toBackendPayload(productInfo);
     console.log('[price-panel] sending product info to backend:', payload);
+    await new Promise(resolve =>
+  setTimeout(resolve, 1500)
+);
 
     try {
       const res = await fetch(PCX_CONFIG.endpoint, {
@@ -324,23 +392,18 @@ this part of the server for the backend to work correctly
         body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error('Request failed: ' + res.status);
+      clearTimeout(slowNetworkTimer);
       const data = await res.json();
       renderResults(data.sources, data.updatedAt);
       renderDayChips(data.bestDeals, data.priceHistory);
       if (!data.bestDeals || !data.bestDeals.length) renderGraph(data.priceHistory);
     } catch (err) {
+      clearTimeout(slowNetworkTimer);
       console.warn('[price-panel] comparison fetch failed, using mock data:', err);
       // Mock fallback so the UI is demoable before the backend is wired up.
       const mockHistory = buildMockHistory();
       const mockDeals = buildMockDeals();
-      renderResults(
-        [
-          { name: 'Best Buy', price: 94.99, url: '#' },
-          { name: 'Walmart', price: 92.50, url: '#' },
-          { name: 'Target', price: 97.00, url: '#' }
-        ],
-        new Date().toISOString()
-      );
+      renderResults([], new Date().toISOString());
       renderDayChips(mockDeals, mockHistory);
     }
   }

@@ -8,9 +8,7 @@
       "matches": [
   "https://www.amazon.de/*",
   "https://www.amazon.com/*",
-  "https://www.amazon.in/*",
-  "https://www.temu.com/*",
-  "https://www.mediamarkt.de/*"
+  "https://www.amazon.in/*"       
 ],
       "css": ["price-panel.css"],
       "js": ["price-panel.js"]
