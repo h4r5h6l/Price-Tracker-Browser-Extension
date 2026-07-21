@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Price Compare",
+  "version": "0.1.0",
+  "description": "Adds a slide-in panel to Amazon product pages showing prices from other websites.",
+  "content_scripts": [
+    {
+      "matches": ["*://*.amazon.com/*"],
+      "css": ["price-panel.css"],
+      "js": ["price-panel.js"]
+    }
+  ]
+}
