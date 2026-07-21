@@ -9,8 +9,7 @@
   "https://www.amazon.de/*",
   "https://www.amazon.com/*",
   "https://www.amazon.in/*",
-  "https://www.temu.com/*",
-  "https://www.mediamarkt.de/*"
+ 
 ],
       "css": ["price-panel.css"],
       "js": ["price-panel.js"]
