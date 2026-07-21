@@ -37,16 +37,13 @@ try:
             "Priority": "u=0, i",
         },
     ) as session:
-        # Use latest version of Chrome's TLS fingerprint
         base_url = "https://www.amazon.de/s?k=laptop"
-
         # Fetch the page using the session and loop
-        current_url, page_num, max_pages = base_url, 1, 2
-
+        current_url, page_num, max_pages = base_url, 1, 10
         # List to store all products across pages
         all_products = []
 
-        # ======================================================================================================================
+        # ============================================================================
 
         # Parse the page for product details
         while page_num <= max_pages and current_url:
@@ -56,41 +53,35 @@ try:
             if page.status != 200:
                 print(f"Failed to fetch page {page_num}: {current_url} (Status code: {page.status})")
                 break
-
             print(f"Page {page_num}")
 
+            # Traversing the page
             product_cards = page.css("div[data-component-type='s-search-result']")
             for cards in product_cards:
                 title = cards.css("h2 span::text").get()
                 price = cards.css("span.a-price-whole::text").get()
+                # pricef = float(price)
                 rating = cards.css("span.a-icon-alt::text").get()
                 asin = cards.css("::attr(data-asin)").get()
                 # print(f"Title: {title}, Price: {price}, Rating: {rating}, Asin: {asin}")
-
                 all_products.append({"title": title, "price": price, "rating": rating, "asin": asin})
-
-            # ======================================================================================================================
-
+            # Saving the metadata of the product
             print(f"Total Items: {len(all_products)} on page {page_num}")
-            save_products(
-                all_products,
-                products_path,
-                history_path
-            )
+
             # Find the next page URL
             # next_page_link = page.css("li.a-last a::attr(href)").get()
             next_page_link = page.css("a.s-pagination-next::attr(href)").get()
             # print("next page link : ", {next_page_link})
-
             if next_page_link:
                 current_url = "https://www.amazon.de" + next_page_link
                 page_num += 1
-
             else:
                 current_url = None
-
             # Sleep for 5 seconds to avoid being blocked
             time.sleep(5)
+
+        # Method from saver.py
+        save_products(all_products, products_path, history_path)
 
 except requests.exceptions.HTTPError as e:
     print(f"HTTP error: {e}")
